@@ -97,7 +97,7 @@ QOIWriter(v::AbstractVecOrMat{UInt8}) = QOIWriter(v, 0)
 @inline function qoi_write!(qoiw::QOIWriter, v::UInt8)
     qoiw.pos += 1 
     qoiw.pos > length(qoiw.v) && resize!(qoiw.v, max(1, length(qoiw.v) * 2))
-    qoiw.v[qoiw.pos] = v
+    @inbounds qoiw.v[qoiw.pos] = v
 end
 
 function qoi_write_32!(qoiw::QOIWriter, v::UInt32)
@@ -158,10 +158,10 @@ function qoi_encode_raw!(data::AbstractVector{UInt8}, image::AbstractVecOrMat{UI
             end
 
             index_pos = mod1(qoi_color_hash(px)+1, 64) % UInt8
-            if index[index_pos] == px
+            if (@inbounds index[index_pos]) == px
                 qoi_write!(qoiw, QOI_OP_INDEX | (index_pos - 0x01))
             else
-                index[index_pos] = px
+                @inbounds index[index_pos] = px
                 if px.a == px_prev.a
                     vr = ((px.r) - (px_prev.r)) % Int8
                     vg = ((px.g) - (px_prev.g)) % Int8
@@ -173,8 +173,8 @@ function qoi_encode_raw!(data::AbstractVector{UInt8}, image::AbstractVecOrMat{UI
                             vg > -3 && vg < 2 &&
                             vb > -3 && vb < 2
                         qoi_write!(qoiw, QOI_OP_DIFF | ((vr + 0x02) % UInt8) << 4 | ((vg + 0x02) % UInt8) << 2 | (vb + 0x02)  % UInt8)
-                    elseif  vg_r > -9 && vg_r < 8 &&
-                            vg > -33  && vg < 32 &&
+                    elseif  vg_r > -9 && vg_r < 8  &&
+                            vg > -33  && vg   < 32 &&
                             vg_b > -9 && vg_b < 8
                         qoi_write!(qoiw, QOI_OP_LUMA   | (vg + UInt8(32)) % UInt8)
                         qoi_write!(qoiw, ((vg_r + 0x08) % UInt8) << 4 | (vg_b + 0x08) % UInt8)
@@ -209,12 +209,12 @@ end
 function qoi_encode(file::String, image::AbstractMatrix{T}) where T <: Colorant
     if T <: TransparentColor
         if T != RGBA{N0f8}
-            image = convert(RGBA{N0f8}, image)
+            image = RGBA{N0f8}.(image)
         end
         channel = QOI_RGBA
     else
         if T != RGB{N0f8}
-            image = convert(RGB{N0f8}, image)
+            image = RGB{N0f8}.(image)
         end 
         channel = QOI_RGB
     end
@@ -237,7 +237,7 @@ mutable struct QOIReader{V <: AbstractVecOrMat{UInt8}}
 end
 QOIReader(v::AbstractVecOrMat{UInt8}) = QOIReader(v, 0)
 
-@inline qoi_read!(qoir::QOIReader) = (qoir.pos+=1; #=@inbounds=# qoir.v[qoir.pos])
+@inline qoi_read!(qoir::QOIReader) = (qoir.pos+=1; @inbounds qoir.v[qoir.pos])
 
 function qoi_read_32!(qoir::QOIReader)
     a = UInt32(qoi_read!(qoir))
@@ -249,8 +249,6 @@ end
 
 @inline qoi_read_rgb!(qoir::QOIReader) = (qoi_read!(qoir), qoi_read!(qoir), qoi_read!(qoir))
 @inline qoi_read_rgba!(qoir::QOIReader) = (qoi_read!(qoir), qoi_read!(qoir), qoi_read!(qoir), qoi_read!(qoir))
-
-
 
 function qoi_decode_raw(v::AbstractVector{UInt8})
     qoir = QOIReader(v)
@@ -274,8 +272,12 @@ function qoi_decode_raw(v::AbstractVector{UInt8})
     px = Pixel(0x00, 0x00, 0x00, 0xFF)
     px_idx = 1
     run = 0x00
+    lenv = length(v)
 
     for px_idx in 1:channels:n_values
+        if qoir.pos > lenv - length(QOI_PADDING)
+            throw_unexpected_eof()
+        end
         if run > 0
             run -= 0x01
         else
@@ -308,12 +310,16 @@ function qoi_decode_raw(v::AbstractVector{UInt8})
             @inbounds index[mod1(qoi_color_hash(px)+1, 64)] = px
         end
 
-        data[px_idx+0] = px.r
-        data[px_idx+1] = px.g
-        data[px_idx+2] = px.b
+        @inbounds data[px_idx+0] = px.r
+        @inbounds data[px_idx+1] = px.g
+        @inbounds data[px_idx+2] = px.b
         if header.channels == QOI_RGBA
-            data[px_idx+3] = px.a
+            @inbounds data[px_idx+3] = px.a
         end
+    end
+
+    if qoir.pos != length(v) - length(QOI_PADDING)
+        throw_unexpected_eof()
     end
 
     # Read padding
