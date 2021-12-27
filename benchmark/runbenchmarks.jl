@@ -101,6 +101,8 @@ function render_table(io::IO, results::Vector{BenchmarkResult})
         |  PNGFiles  |$png_dec_ms|$png_enc_ms|$png_dec_mpps|$png_enc_mpps|$png_size_kb |$png_rate%|
         |  QOI       |$qoi_dec_ms|$qoi_enc_ms|$qoi_dec_mpps|$qoi_enc_mpps|$qoi_size_kb |$qoi_rate%|
 
+        ----------------------
+
         """)
     end
 end
