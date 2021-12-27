@@ -39,6 +39,9 @@ The images used in the benchmark are taken from `TestImages.jl`, specifically, a
 The benchmarks was run on Linux on a 12th Gen Intel(R) Core(TM) i9-12900K CPU.
 They can be repeated by running the `benchmark/runbenchmarks.jl` file with the associated environment.
 
+<details><summary>Expand to see benchmark results</summary>
+
+
 `autumn_leaves.png` 105x140 57.42kB
 
 |           | decode ms | encode ms | decode mpps | encode mpps | size kb | rate |
@@ -163,6 +166,7 @@ They can be repeated by running the `benchmark/runbenchmarks.jl` file with the a
 |  PNGFiles  |0.34|0.58|274.49|158.87|25.84 |27.2%|
 |  QOI       |0.06|0.18|1513.03|514.79|43.28 |45.6%|
 
+</details>
 
 ## TODOs:
 
