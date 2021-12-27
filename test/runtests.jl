@@ -53,8 +53,8 @@ data_io = open(QOI.qoi_decode, f_logo)
 data_file = QOI.qoi_decode(f_logo)
 @test data_io == data_file
 
-# Test FileIO integration
-@test data_file == FileIO.load(f_logo)
-t = tempname()
-@test data_file == FileIO.save(t, data_file)
-@test read(f_logo) == read(t)
+# Test FileIO integration (enable when https://github.com/JuliaIO/FileIO.jl/pull/354 is merged)
+# @test data_file == FileIO.load(f_logo)
+# t = tempname()
+# @test data_file == FileIO.save(t, data_file)
+# @test read(f_logo) == read(t)
