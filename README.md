@@ -1,5 +1,10 @@
 # QOI.jl - Implementation of the QOI (Quite OK Image) format 
 
+[![Build Status](https://github.com/KristofferC/QOI.jl/workflows/CI/badge.svg)](https://github.com/KristofferC/QOI.jl/actions?query=workflows/CI)
+
+<!-- [![codecov](https://codecov.io/gh/KristofferC/QOI.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/KristofferC/QOI.jl) -->
+
+
 This Julia package contains a decoder and encoder for the [QOI image format](https://qoiformat.org/). The QOI format is very simple and can be faster than using PNG (see the [benchmarks](#benchmarks)) at the cost of slightly worse compression ratio.
 
 The code here is based on the reference C implementation given in https://github.com/phoboslab/qoi.
