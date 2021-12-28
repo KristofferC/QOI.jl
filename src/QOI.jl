@@ -352,7 +352,6 @@ qoi_decode(f::Union{String, IO}) = qoi_decode(Base.read(f))
 # FileIO #
 ##########
 
-# Again, this is a *private* `load` function, do not extend `FileIO.load`!
 load(f::File{format"QOI"}) = qoi_decode(f.filename)
 save(f::File{format"QOI"}, image::AbstractMatrix{<:Colorant}) = qoi_encode(f.filename, image)
 
