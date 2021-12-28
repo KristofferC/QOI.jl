@@ -9,6 +9,7 @@ This Julia package contains a decoder and encoder for the [QOI image format](htt
 
 The code here is based on the reference C implementation given in https://github.com/phoboslab/qoi.
 
+<!--
 ## FileIO API
 
 This is the simple API and likely the one that most should use.
@@ -18,6 +19,7 @@ using FileIO
 image = load("test.qoi")
 save("test2.qoi", image)
 ```
+-->
 
 ## Basic API
 
