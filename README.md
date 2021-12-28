@@ -9,6 +9,16 @@ This Julia package contains a decoder and encoder for the [QOI image format](htt
 
 The code here is based on the reference C implementation given in https://github.com/phoboslab/qoi.
 
+## FileIO API
+
+This is the simple API and likely the one that most should use.
+
+```jl
+using FileIO
+image = load("test.qoi")
+save("test2.qoi", image)
+```
+
 ## Basic API
 
 - `QOI.qoi_decode(f::Union{String, IO})` - Read an image in the QOI format from the file/IO `f` and return a matrix with `RGB` or `RGBA` colorants from [ColorTypes.jl](https://github.com/JuliaGraphics/ColorTypes.jl)
@@ -27,8 +37,8 @@ To avoid this, the following more advanced APIs exist:
   struct QOIHeader
     width::UInt32
     height::UInt32
-    channels::QOIChannel
-    colorspace::QOIColorSpace
+    channels::QOI.QOIChannel # @enum
+    colorspace::QOI.QOIColorSpace # @enum
   end
   ```
 
@@ -172,7 +182,3 @@ They can be repeated by running the `benchmark/runbenchmarks.jl` file with the a
 |  QOI       |0.06|0.18|1513.03|514.79|43.28 |45.6%|
 
 </details>
-
-## TODOs:
-
-- Integrate with FileIO.jl
