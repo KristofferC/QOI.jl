@@ -4,15 +4,18 @@ using Downloads
 using p7zip_jll
 using ImageIO
 using FileIO
+using Scratch
 
-function download_testset()
-    p7z = p7zip_jll.p7zip()
-    # TODO: Cache this and host it somewhere else to be nice.
-    # Perhaps use a scratch space based on the SHA of the file?
-    file = Downloads.download("https://qoiformat.org/qoi_test_images.zip")
-    tempdir = mktempdir()
-    run(`$p7z e $file -o$tempdir`)
-    return tempdir
+const DOWNLOAD_SHA = "869a6433a3af7ce84fc55fda6a5387d6c2113c3e8231153549a6407ed1e71696"
+
+function get_testset()
+    scratch = get_scratch!(Scratch, DOWNLOAD_SHA)
+    if isempty(readdir(scratch))
+        p7z = p7zip_jll.p7zip()
+        file = Downloads.download("https://github.com/KristofferC/QOI.jl/releases/download/v0.0.0/qoi_test_images.zip")
+        run(`$p7z e $file -o$scratch`)
+    end
+    return scratch
 end
 
 function check_roundtrip_qoi(file)
@@ -21,10 +24,10 @@ function check_roundtrip_qoi(file)
     return data == read(file)
 end
 
-tmp = download_testset()    
+testset = get_testset()    
 
 # Test roundtrip of raw decode/encode
-for file in readdir(tmp; join=true)
+for file in readdir(testset; join=true)
     if endswith(file, ".qoi")
         @info "testing roundtrip of $file"
         @test check_roundtrip_qoi(file)
@@ -32,7 +35,7 @@ for file in readdir(tmp; join=true)
 end
 
 # Test correctness vs PNG
-for file_name in Set(getindex.(splitext.(readdir(tmp; join=true)), 1))
+for file_name in Set(getindex.(splitext.(readdir(testset; join=true)), 1))
     qoi = file_name * ".qoi"
     isfile(qoi) || continue
     @info "comparing to png $qoi"
