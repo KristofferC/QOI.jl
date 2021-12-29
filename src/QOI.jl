@@ -58,10 +58,14 @@ struct QOIHeader
     colorspace::QOIColorSpace
 end
 function QOIHeader(width::UInt32, height::UInt32, channels::UInt8, colorspace::UInt8)
-    if (width == 0 || height == 0 ||
-        channels < 3 || channels > 4 ||
-        colorspace > 1) # TODO: Check size
-        throw_invalid_header_error()
+    if (width == 0)
+        throw_invalid_header_width(width)
+    elseif (height == 0)
+        throw_invalid_header_height(height)
+    elseif channels < 3 || channels > 4
+        throw_invalid_header_channels(channels)
+    elseif colorspace > 1
+        throw_invalid_header_colorspace(colorspace)
     end
     return QOIHeader(width, height, QOIChannel(channels), QOIColorSpace(colorspace))
 end
@@ -78,10 +82,11 @@ Base.showerror(io::IO, qoi::QOIException) = print(io, qoi.msg)
 
 @noinline throw_magic_bytes_error(magic::UInt32) =
     throw(QOIException("invalid magic bytes, got $(repr(magic)), expected $(repr(QOI_MAGIC))"))
-@noinline throw_invalid_header_error() =
-    throw(QOIException("invalid header"))
-@noinline throw_unexpected_eof() =
-    throw(QOIException("unexpected end of file"))
+@noinline throw_invalid_header_width(width::UInt32) = throw(QOIException("invalid width in header, got $width"))
+@noinline throw_invalid_header_height(height::UInt32) = throw(QOIException("invalid height in header, got $height"))
+@noinline throw_invalid_header_channels(channels::UInt8) = throw(QOIException("invalid channels in header, got $channels"))
+@noinline throw_invalid_header_colorspace(colorspace::UInt8) = throw(QOIException("invalid colorspace in header, got $colorspace"))
+@noinline throw_unexpected_eof() = throw(QOIException("unexpected end of file"))
 
 
 ############
@@ -252,6 +257,10 @@ end
 
 function qoi_decode_raw(v::AbstractVector{UInt8})
     qoir = QOIReader(v)
+
+    if length(v) < 14 # 4 magic + 10 header
+        throw_unexpected_eof()
+    end
 
     # Magic
     magic = _qoi_read_32!(qoir)

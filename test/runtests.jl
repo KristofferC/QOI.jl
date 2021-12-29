@@ -51,6 +51,58 @@ end
 
 f_logo = joinpath(@__DIR__, "qoi_logo.qoi")
 
+# Invalid images
+
+# Unexpected end
+io = IOBuffer()
+write(io, "qoif")
+write(io, hton(UInt32(10)))
+write(io, hton(UInt32(0))) 
+@test_throws QOI.QOIException("unexpected end of file") QOI.qoi_decode_raw(take!(io))
+
+
+# Invalid width
+io = IOBuffer()
+write(io, "qoif")
+write(io, hton.(UInt32.([0, 10])))
+write(io, hton.(UInt8.([3, 1])))
+@test_throws QOI.QOIException("invalid width in header, got 0") QOI.qoi_decode_raw(take!(io))
+
+# Invalid height
+io = IOBuffer()
+write(io, "qoif")
+write(io, hton.(UInt32.([10, 0])))
+write(io, hton.(UInt8.([3, 1])))
+@test_throws QOI.QOIException("invalid height in header, got 0") QOI.qoi_decode_raw(take!(io))
+
+# Invalid channels
+io = IOBuffer()
+write(io, "qoif")
+write(io, hton.(UInt32.([10, 5])))
+write(io, hton.(UInt8.([5, 1])))
+@test_throws QOI.QOIException("invalid channels in header, got 5") QOI.qoi_decode_raw(take!(io))
+
+# Invalid colorspace
+io = IOBuffer()
+write(io, "qoif")
+write(io, hton.(UInt32.([10, 5])))
+write(io, hton.(UInt8.([3, 2])))
+@test_throws QOI.QOIException("invalid colorspace in header, got 2") QOI.qoi_decode_raw(take!(io))
+
+# Too little data after header
+io = IOBuffer()
+write(io, "qoif")
+write(io, hton.(UInt32.([10, 5])))
+write(io, hton.(UInt8.([3, 1])))
+@test_throws QOI.QOIException("unexpected end of file") QOI.qoi_decode_raw(take!(io))
+
+# Invalid magic bytes
+io = IOBuffer()
+write(io, "qoiz")
+write(io, hton.(UInt32.([10, 5])))
+write(io, hton.(UInt8.([3, 1])))
+@test_throws QOI.QOIException("invalid magic bytes, got 0x716f697a, expected 0x716f6966") QOI.qoi_decode_raw(take!(io))
+
 # Test IO API
 data_io = open(QOI.qoi_decode, f_logo)
 data_file = QOI.qoi_decode(f_logo)
