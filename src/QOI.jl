@@ -4,6 +4,7 @@ using FixedPointNumbers
 using ColorTypes
 using FileIO
 
+
 #############
 # Constants #
 #############
@@ -37,17 +38,34 @@ end
 @inline _qoi_color_hash(p::Pixel) = p.r*3 + p.g*5 + p.b*7 + p.a*11
 
 
+##############  
+# Exceptions #
+##############
+
+struct QOIException <: Exception
+    msg::String
+end
+Base.showerror(io::IO, qoi::QOIException) = print(io, qoi.msg)
+
+@noinline throw_magic_bytes_error(magic::UInt32)             = throw(QOIException("invalid magic bytes, got $(repr(magic)), expected $(repr(QOI_MAGIC))"))
+@noinline throw_invalid_header_width(width::UInt32)          = throw(QOIException("invalid width in header, got $width"))
+@noinline throw_invalid_header_height(height::UInt32)        = throw(QOIException("invalid height in header, got $height"))
+@noinline throw_invalid_header_channels(channels::UInt8)     = throw(QOIException("invalid channels in header, got $channels"))
+@noinline throw_invalid_header_colorspace(colorspace::UInt8) = throw(QOIException("invalid colorspace in header, got $colorspace"))
+@noinline throw_unexpected_eof()                             = throw(QOIException("unexpected end of file"))
+
+
 #############
 # QOIHeader #
 #############
 
 @enum QOIChannel::UInt8 begin
-    QOI_RGB = 0x03
+    QOI_RGB  = 0x03
     QOI_RGBA = 0x04
 end
 
 @enum QOIColorSpace::UInt8 begin
-    QOI_SRGB = 0x00
+    QOI_SRGB   = 0x00
     QOI_LINEAR = 0x01
 end
 
@@ -58,35 +76,12 @@ struct QOIHeader
     colorspace::QOIColorSpace
 end
 function QOIHeader(width::UInt32, height::UInt32, channels::UInt8, colorspace::UInt8)
-    if (width == 0)
-        throw_invalid_header_width(width)
-    elseif (height == 0)
-        throw_invalid_header_height(height)
-    elseif channels < 3 || channels > 4
-        throw_invalid_header_channels(channels)
-    elseif colorspace > 1
-        throw_invalid_header_colorspace(colorspace)
-    end
+    width == 0                   && throw_invalid_header_width(width)
+    height == 0                  && throw_invalid_header_height(height)
+    channels < 3 || channels > 4 && throw_invalid_header_channels(channels)
+    colorspace > 1               && throw_invalid_header_colorspace(colorspace)
     return QOIHeader(width, height, QOIChannel(channels), QOIColorSpace(colorspace))
 end
-
-
-##############  
-# Exceptions #
-##############
-
-struct QOIException <: Exception
-    msg::String
-end
-Base.showerror(io::IO, qoi::QOIException) = print(io, qoi.msg)
-
-@noinline throw_magic_bytes_error(magic::UInt32) =
-    throw(QOIException("invalid magic bytes, got $(repr(magic)), expected $(repr(QOI_MAGIC))"))
-@noinline throw_invalid_header_width(width::UInt32) = throw(QOIException("invalid width in header, got $width"))
-@noinline throw_invalid_header_height(height::UInt32) = throw(QOIException("invalid height in header, got $height"))
-@noinline throw_invalid_header_channels(channels::UInt8) = throw(QOIException("invalid channels in header, got $channels"))
-@noinline throw_invalid_header_colorspace(colorspace::UInt8) = throw(QOIException("invalid colorspace in header, got $colorspace"))
-@noinline throw_unexpected_eof() = throw(QOIException("unexpected end of file"))
 
 
 ############
@@ -122,7 +117,7 @@ function qoi_encode_raw(io::IO, image::AbstractVecOrMat{UInt8}, header::QOIHeade
 end
 
 function qoi_encode_raw!(data::AbstractVector{UInt8}, image::AbstractVecOrMat{UInt8}, header::QOIHeader)
-    # error Check
+    # TODO: Check size of data against QOI_PIXELS_MAX?
 
     qoiw = QOIWriter(data)
 
@@ -204,7 +199,7 @@ function qoi_encode_raw!(data::AbstractVector{UInt8}, image::AbstractVecOrMat{UI
     # Padding
     for x in QOI_PADDING
         _qoi_write!(qoiw, x)
-	end
+    end
 
     sizehint!(data, qoiw.pos)
     resize!(data, qoiw.pos)
