@@ -5,6 +5,8 @@ using p7zip_jll
 using ImageIO
 using FileIO
 using Scratch
+using ColorTypes
+using FixedPointNumbers
 
 const DOWNLOAD_SHA = "869a6433a3af7ce84fc55fda6a5387d6c2113c3e8231153549a6407ed1e71696"
 
@@ -49,7 +51,19 @@ for file_name in Set(getindex.(splitext.(readdir(testset; join=true)), 1))
     @test read(t) == read(qoi)
 end
 
-f_logo = joinpath(@__DIR__, "qoi_logo.qoi")
+# Test saving imges not in N0f8 format
+img_gray = rand(Gray{N0f8}, 5, 5)
+t = tempname()
+QOI.qoi_encode(t, img_gray)
+img_qoi = QOI.qoi_decode(t)
+@test convert(Matrix{RGB{N0f8}}, img_gray) == img_qoi
+
+img_24bit = rand(RGBA{Float64}, 5, 5)
+t = tempname()
+QOI.qoi_encode(t, img_24bit)
+img_qoi = QOI.qoi_decode(t)
+@test convert(Matrix{RGBA{N0f8}}, img_24bit) == img_qoi
+
 
 # Invalid images
 
@@ -102,6 +116,9 @@ write(io, "qoiz")
 write(io, hton.(UInt32.([10, 5])))
 write(io, hton.(UInt8.([3, 1])))
 @test_throws QOI.QOIException("invalid magic bytes, got 0x716f697a, expected 0x716f6966") QOI.qoi_decode_raw(take!(io))
+
+
+const f_logo = joinpath(@__DIR__, "qoi_logo.qoi")
 
 # Test IO API
 data_io = open(QOI.qoi_decode, f_logo)
