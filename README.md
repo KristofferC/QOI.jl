@@ -7,17 +7,15 @@ This Julia package contains a decoder and encoder for the [QOI image format](htt
 
 The code here is based on the reference C implementation given in https://github.com/phoboslab/qoi.
 
-<!--
 ## FileIO API
 
-This is the simple API and likely the one that most should use.
+This is the simplest API and likely the one that most should use. Simply, use the `load`/`save` API from FileIO.jl to load and save QOI images.
 
 ```jl
 using FileIO
 image = load("test.qoi")
 save("test2.qoi", image)
 ```
--->
 
 ## Basic API
 
