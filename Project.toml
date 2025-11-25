@@ -1,7 +1,7 @@
 name = "QOI"
 uuid = "4b34888f-f399-49d4-9bb3-47ed5cae4e65"
 authors = ["Kristoffer <kcarlsson89@gmail.com> and contributors"]
-version = "1.0.1"
+version = "1.0.2"
 
 [deps]
 ColorTypes = "3da002f7-5984-5a60-b8a6-cbb66c0b333f"
