@@ -51,7 +51,7 @@ for file_name in Set(getindex.(splitext.(readdir(testset; join=true)), 1))
     @test read(t) == read(qoi)
 end
 
-# Test saving imges not in N0f8 format
+# Test saving images not in N0f8 format
 img_gray = rand(Gray{N0f8}, 5, 5)
 t = tempname()
 QOI.qoi_encode(t, img_gray)
@@ -102,6 +102,13 @@ write(io, "qoif")
 write(io, hton.(UInt32.([10, 5])))
 write(io, hton.(UInt8.([3, 2])))
 @test_throws QOI.QOIException("invalid colorspace in header, got 2") QOI.qoi_decode_raw(take!(io))
+
+# Image too large (exceeds QOI_PIXELS_MAX)
+io = IOBuffer()
+write(io, "qoif")
+write(io, hton.(UInt32.([20001, 20000])))  # 20001 * 20000 = 400020000 > 400000000
+write(io, hton.(UInt8.([3, 0])))
+@test_throws QOI.QOIException QOI.qoi_decode_raw(take!(io))
 
 # Too little data after header
 io = IOBuffer()

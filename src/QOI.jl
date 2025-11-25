@@ -30,15 +30,13 @@ struct Pixel
     g::UInt8
     b::UInt8
     a::UInt8
-    function Pixel(r::UInt8, g::UInt8, b::UInt8, a::UInt8)
-        new(r, g, b, a)
-    end
 end
 
 @inline _qoi_color_hash(p::Pixel) = p.r*3 + p.g*5 + p.b*7 + p.a*11
+@inline _qoi_index_pos(p::Pixel) = (_qoi_color_hash(p) % 64) + 1
 
 
-##############  
+##############
 # Exceptions #
 ##############
 
@@ -53,6 +51,7 @@ Base.showerror(io::IO, qoi::QOIException) = print(io, qoi.msg)
 @noinline throw_invalid_header_channels(channels::UInt8)     = throw(QOIException("invalid channels in header, got $channels"))
 @noinline throw_invalid_header_colorspace(colorspace::UInt8) = throw(QOIException("invalid colorspace in header, got $colorspace"))
 @noinline throw_unexpected_eof()                             = throw(QOIException("unexpected end of file"))
+@noinline throw_image_too_large(n_pixels)                    = throw(QOIException("image too large, $n_pixels pixels exceeds maximum of $QOI_PIXELS_MAX"))
 
 
 #############
@@ -80,6 +79,8 @@ function QOIHeader(width::UInt32, height::UInt32, channels::UInt8, colorspace::U
     height == 0                  && throw_invalid_header_height(height)
     channels < 3 || channels > 4 && throw_invalid_header_channels(channels)
     colorspace > 1               && throw_invalid_header_colorspace(colorspace)
+    n_pixels = Int64(width) * Int64(height)
+    n_pixels > QOI_PIXELS_MAX    && throw_image_too_large(n_pixels)
     return QOIHeader(width, height, QOIChannel(channels), QOIColorSpace(colorspace))
 end
 
@@ -95,7 +96,7 @@ end
 QOIWriter(v::AbstractVecOrMat{UInt8}) = QOIWriter(v, 0)
 
 @inline function _qoi_write!(qoiw::QOIWriter, v::UInt8)
-    qoiw.pos += 1 
+    qoiw.pos += 1
     qoiw.pos > length(qoiw.v) && resize!(qoiw.v, max(1, length(qoiw.v) * 2))
     @inbounds qoiw.v[qoiw.pos] = v
 end
@@ -105,7 +106,7 @@ function _qoi_write_32!(qoiw::QOIWriter, v::UInt32)
     _qoi_write!(qoiw, ((0x00ff0000 & v) >> 16) % UInt8)
     _qoi_write!(qoiw, ((0x0000ff00 & v) >> 8)  % UInt8)
     _qoi_write!(qoiw, ((0x000000ff & v))       % UInt8)
-    return 
+    return
 end
 
 qoi_encode_raw(image::AbstractVecOrMat{UInt8}, header::QOIHeader) =
@@ -117,23 +118,21 @@ function qoi_encode_raw(io::IO, image::AbstractVecOrMat{UInt8}, header::QOIHeade
 end
 
 function qoi_encode_raw!(data::AbstractVector{UInt8}, image::AbstractVecOrMat{UInt8}, header::QOIHeader)
-    # TODO: Check size of data against QOI_PIXELS_MAX?
-
     qoiw = QOIWriter(data)
 
     # Header
     _qoi_write_32!(qoiw, QOI_MAGIC)
     _qoi_write_32!(qoiw, header.width)
     _qoi_write_32!(qoiw, header.height)
-    _qoi_write!(qoiw, header.channels |> Integer)
-    _qoi_write!(qoiw, header.colorspace |> Integer)
+    _qoi_write!(qoiw, UInt8(header.channels))
+    _qoi_write!(qoiw, UInt8(header.colorspace))
 
     index = fill(Pixel(0x00, 0x00, 0x00, 0x00), 64)
     run = 0x00
     px_prev = Pixel(0x00, 0x00, 0x00, 0xff)
     px = px_prev
-    
-    channels = Integer(header.channels)
+
+    channels = Int(header.channels)
     px_len = header.width * header.height * channels
     px_end = px_len - channels + 1
 
@@ -157,9 +156,9 @@ function qoi_encode_raw!(data::AbstractVector{UInt8}, image::AbstractVecOrMat{UI
                 run = 0x00
             end
 
-            index_pos = mod1(_qoi_color_hash(px)+1, 64) % UInt8
+            index_pos = _qoi_index_pos(px)
             if (@inbounds index[index_pos]) == px
-                _qoi_write!(qoiw, QOI_OP_INDEX | (index_pos - 0x01))
+                _qoi_write!(qoiw, QOI_OP_INDEX | UInt8(index_pos - 1))
             else
                 @inbounds index[index_pos] = px
                 if px.a == px_prev.a
@@ -206,7 +205,7 @@ function qoi_encode_raw!(data::AbstractVector{UInt8}, image::AbstractVecOrMat{UI
     return data
 end
 
-function qoi_encode(file::String, image::AbstractMatrix{T}) where T <: Colorant
+function qoi_encode(io::IO, image::AbstractMatrix{T}) where T <: Colorant
     if T <: TransparentColor
         if T != RGBA{N0f8}
             image = RGBA{N0f8}.(image)
@@ -215,14 +214,18 @@ function qoi_encode(file::String, image::AbstractMatrix{T}) where T <: Colorant
     else
         if T != RGB{N0f8}
             image = RGB{N0f8}.(image)
-        end 
+        end
         channel = QOI_RGB
     end
     header = QOIHeader(size(image, 2), size(image, 1), channel, QOI_SRGB)
     image = permutedims(image)
+    image_raw = reinterpret(UInt8, image)
+    qoi_encode_raw(io, image_raw, header)
+end
+
+function qoi_encode(file::String, image::AbstractMatrix{<:Colorant})
     open(file, "w") do io
-        image_raw = reinterpret(UInt8, image)
-        qoi_encode_raw(io, image_raw, header)
+        qoi_encode(io, image)
     end
 end
 
@@ -274,7 +277,6 @@ function qoi_decode_raw(v::AbstractVector{UInt8})
     data = Vector{UInt8}(undef, n_values)
     index = fill(Pixel(0x00, 0x00, 0x00, 0x00), 64)
     px = Pixel(0x00, 0x00, 0x00, 0xFF)
-    px_idx = 1
     run = 0x00
     lenv = length(v)
 
@@ -287,7 +289,7 @@ function qoi_decode_raw(v::AbstractVector{UInt8})
         else
             b1 = _qoi_read!(qoir)
             if b1 == QOI_OP_RGB
-                r, g, b = _qoi_read_rgb!(qoir)     
+                r, g, b = _qoi_read_rgb!(qoir)
                 px = Pixel(r, g, b, px.a)
             elseif b1 == QOI_OP_RGBA
                 r, g, b, a = _qoi_read_rgba!(qoir)
@@ -311,7 +313,7 @@ function qoi_decode_raw(v::AbstractVector{UInt8})
             else
                 error("unreachable")
             end
-            @inbounds index[mod1(_qoi_color_hash(px)+1, 64)] = px
+            @inbounds index[_qoi_index_pos(px)] = px
         end
 
         @inbounds data[px_idx+0] = px.r
@@ -328,9 +330,9 @@ function qoi_decode_raw(v::AbstractVector{UInt8})
 
     # Read padding
     for _ in 1:7
-        x = _qoi_read!(qoir) 
+        x = _qoi_read!(qoir)
         x == 0 || throw_unexpected_eof()
-    end  
+    end
     x = _qoi_read!(qoir)
     x == 1 || throw_unexpected_eof()
 
@@ -339,7 +341,7 @@ function qoi_decode_raw(v::AbstractVector{UInt8})
 end
 
 function _to_colortype(header, raw_image)
-    T = header.channels == QOI_RGBA ? RGBA{N0f8} : RGB{N0f8} 
+    T = header.channels == QOI_RGBA ? RGBA{N0f8} : RGB{N0f8}
     return permutedims(reinterpret(T, raw_image))
 end
 
