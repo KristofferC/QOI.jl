@@ -52,6 +52,7 @@ Base.showerror(io::IO, qoi::QOIException) = print(io, qoi.msg)
 @noinline throw_invalid_header_colorspace(colorspace::UInt8) = throw(QOIException("invalid colorspace in header, got $colorspace"))
 @noinline throw_unexpected_eof()                             = throw(QOIException("unexpected end of file"))
 @noinline throw_image_too_large(n_pixels)                    = throw(QOIException("image too large, $n_pixels pixels exceeds maximum of $QOI_PIXELS_MAX"))
+@noinline throw_image_too_small(len, expected)               = throw(QOIException("image data has length $len, but the header requires at least $expected"))
 
 
 #############
@@ -74,13 +75,18 @@ struct QOIHeader
     channels::QOIChannel
     colorspace::QOIColorSpace
 end
-function QOIHeader(width::UInt32, height::UInt32, channels::UInt8, colorspace::UInt8)
-    width == 0                   && throw_invalid_header_width(width)
-    height == 0                  && throw_invalid_header_height(height)
-    channels < 3 || channels > 4 && throw_invalid_header_channels(channels)
-    colorspace > 1               && throw_invalid_header_colorspace(colorspace)
+function _check_dims(width::UInt32, height::UInt32)
+    width == 0                && throw_invalid_header_width(width)
+    height == 0               && throw_invalid_header_height(height)
     n_pixels = Int64(width) * Int64(height)
-    n_pixels > QOI_PIXELS_MAX    && throw_image_too_large(n_pixels)
+    n_pixels > QOI_PIXELS_MAX && throw_image_too_large(n_pixels)
+    return
+end
+
+function QOIHeader(width::UInt32, height::UInt32, channels::UInt8, colorspace::UInt8)
+    _check_dims(width, height)
+    (channels < 3 || channels > 4) && throw_invalid_header_channels(channels)
+    colorspace > 1                 && throw_invalid_header_colorspace(colorspace)
     return QOIHeader(width, height, QOIChannel(channels), QOIColorSpace(colorspace))
 end
 
@@ -89,16 +95,17 @@ end
 # Encoding #
 ############
 
-mutable struct QOIWriter{V <: AbstractVecOrMat{UInt8}}
+# The output buffer is resized to the worst case size up front so writes do not need bounds checks.
+mutable struct QOIWriter{V <: AbstractVector{UInt8}}
     v::V
     pos::Int
 end
-QOIWriter(v::AbstractVecOrMat{UInt8}) = QOIWriter(v, 0)
+QOIWriter(v::AbstractVector{UInt8}) = QOIWriter(v, 0)
 
 @inline function _qoi_write!(qoiw::QOIWriter, v::UInt8)
     qoiw.pos += 1
-    qoiw.pos > length(qoiw.v) && resize!(qoiw.v, max(1, length(qoiw.v) * 2))
     @inbounds qoiw.v[qoiw.pos] = v
+    return
 end
 
 function _qoi_write_32!(qoiw::QOIWriter, v::UInt32)
@@ -109,8 +116,11 @@ function _qoi_write_32!(qoiw::QOIWriter, v::UInt32)
     return
 end
 
-qoi_encode_raw(image::AbstractVecOrMat{UInt8}, header::QOIHeader) =
-    qoi_encode_raw!(Vector{UInt8}(undef, 256), image, header)
+function qoi_encode_raw(image::AbstractVecOrMat{UInt8}, header::QOIHeader)
+    data = qoi_encode_raw!(UInt8[], image, header)
+    # Release the memory over-allocated for the worst case
+    return sizehint!(data, length(data))
+end
 
 function qoi_encode_raw(io::IO, image::AbstractVecOrMat{UInt8}, header::QOIHeader)
     data = qoi_encode_raw(image, header)
@@ -118,6 +128,16 @@ function qoi_encode_raw(io::IO, image::AbstractVecOrMat{UInt8}, header::QOIHeade
 end
 
 function qoi_encode_raw!(data::AbstractVector{UInt8}, image::AbstractVecOrMat{UInt8}, header::QOIHeader)
+    Base.require_one_based_indexing(data, image)
+    _check_dims(header.width, header.height)
+    channels = Int(header.channels)
+    n_pixels = Int(header.width) * Int(header.height)
+    px_len = n_pixels * channels
+    length(image) < px_len && throw_image_too_small(length(image), px_len)
+
+    # Worst case: every pixel is a QOI_OP_RGBA (5 bytes)
+    max_size = 14 + n_pixels * (channels + 1) + length(QOI_PADDING)
+    resize!(data, max_size)
     qoiw = QOIWriter(data)
 
     # Header
@@ -132,16 +152,17 @@ function qoi_encode_raw!(data::AbstractVector{UInt8}, image::AbstractVecOrMat{UI
     px_prev = Pixel(0x00, 0x00, 0x00, 0xff)
     px = px_prev
 
-    channels = Int(header.channels)
-    px_len = header.width * header.height * channels
     px_end = px_len - channels + 1
+    has_alpha = header.channels == QOI_RGBA
 
     # Data
     for px_pos in 1:channels:px_len
-        r = image[px_pos + 0]
-        g = image[px_pos + 1]
-        b = image[px_pos + 2]
-        a = header.channels == QOI_RGBA ? image[px_pos + 3] : 0xff
+        @inbounds begin
+            r = image[px_pos + 0]
+            g = image[px_pos + 1]
+            b = image[px_pos + 2]
+            a = has_alpha ? image[px_pos + 3] : 0xff
+        end
         px = Pixel(r, g, b, a)
 
         if px == px_prev
@@ -200,27 +221,23 @@ function qoi_encode_raw!(data::AbstractVector{UInt8}, image::AbstractVecOrMat{UI
         _qoi_write!(qoiw, x)
     end
 
-    sizehint!(data, qoiw.pos)
-    resize!(data, qoiw.pos)
-    return data
+    return resize!(data, qoiw.pos)
 end
 
 function qoi_encode(io::IO, image::AbstractMatrix{T}) where T <: Colorant
     if T <: TransparentColor
-        if T != RGBA{N0f8}
-            image = RGBA{N0f8}.(image)
-        end
+        C = RGBA{N0f8}
         channel = QOI_RGBA
     else
-        if T != RGB{N0f8}
-            image = RGB{N0f8}.(image)
-        end
+        C = RGB{N0f8}
         channel = QOI_RGB
     end
-    header = QOIHeader(size(image, 2), size(image, 1), channel, QOI_SRGB)
-    image = permutedims(image)
-    image_raw = reinterpret(UInt8, image)
-    qoi_encode_raw(io, image_raw, header)
+    height, width = size(image)
+    header = QOIHeader(UInt32(width), UInt32(height), channel, QOI_SRGB)
+    # QOI is row-major so transpose (and convert to `C`) in a single pass
+    image_t = Matrix{C}(undef, width, height)
+    permutedims!(image_t, image, (2, 1))
+    qoi_encode_raw(io, reinterpret(UInt8, image_t), header)
 end
 
 function qoi_encode(file::String, image::AbstractMatrix{<:Colorant})
@@ -254,6 +271,7 @@ end
 @inline _qoi_read_rgba!(qoir::QOIReader) = (_qoi_read!(qoir), _qoi_read!(qoir), _qoi_read!(qoir), _qoi_read!(qoir))
 
 function qoi_decode_raw(v::AbstractVector{UInt8})
+    Base.require_one_based_indexing(v)
     qoir = QOIReader(v)
 
     if length(v) < 14 # 4 magic + 10 header
@@ -272,21 +290,22 @@ function qoi_decode_raw(v::AbstractVector{UInt8})
     header = QOIHeader(width, height, channels, colorspace)
 
     # Data
-    n_pixels = header.width * header.height
-    n_values = n_pixels * channels
+    n_pixels = Int(header.width) * Int(header.height)
+    n_values = n_pixels * Int(channels)
+    has_alpha = header.channels == QOI_RGBA
     data = Vector{UInt8}(undef, n_values)
     index = fill(Pixel(0x00, 0x00, 0x00, 0x00), 64)
     px = Pixel(0x00, 0x00, 0x00, 0xFF)
     run = 0x00
-    lenv = length(v)
+    # A chunk is at most 5 bytes so as long as we start reading a chunk before
+    # the padding, we will not read out of bounds.
+    chunks_end = length(v) - length(QOI_PADDING)
 
-    for px_idx in 1:channels:n_values
-        if qoir.pos > lenv - length(QOI_PADDING)
-            throw_unexpected_eof()
-        end
+    for px_idx in 1:Int(channels):n_values
         if run > 0
             run -= 0x01
         else
+            qoir.pos >= chunks_end && throw_unexpected_eof()
             b1 = _qoi_read!(qoir)
             if b1 == QOI_OP_RGB
                 r, g, b = _qoi_read_rgb!(qoir)
@@ -295,7 +314,7 @@ function qoi_decode_raw(v::AbstractVector{UInt8})
                 r, g, b, a = _qoi_read_rgba!(qoir)
                 px = Pixel(r, g, b, a)
             elseif b1 & QOI_MASK_2 == QOI_OP_INDEX
-                px = index[b1+0x01]
+                px = @inbounds index[b1+0x01]
             elseif (b1 & QOI_MASK_2) == QOI_OP_DIFF
                 r = px.r + ((b1 >> 0x04) & 0x03) - 0x02
                 g = px.g + ((b1 >> 0x02) & 0x03) - 0x02
@@ -319,7 +338,7 @@ function qoi_decode_raw(v::AbstractVector{UInt8})
         @inbounds data[px_idx+0] = px.r
         @inbounds data[px_idx+1] = px.g
         @inbounds data[px_idx+2] = px.b
-        if header.channels == QOI_RGBA
+        if has_alpha
             @inbounds data[px_idx+3] = px.a
         end
     end
@@ -336,7 +355,7 @@ function qoi_decode_raw(v::AbstractVector{UInt8})
     x = _qoi_read!(qoir)
     x == 1 || throw_unexpected_eof()
 
-    image = reshape(data, Int(header.width) * channels, Int(header.height))
+    image = reshape(data, Int(header.width) * Int(channels), Int(header.height))
     return header, image
 end
 
@@ -359,6 +378,8 @@ qoi_decode(f::Union{String, IO}) = qoi_decode(Base.read(f))
 ##########
 
 load(f::File{format"QOI"}) = qoi_decode(f.filename)
+load(s::Stream{format"QOI"}) = qoi_decode(stream(s))
 save(f::File{format"QOI"}, image::AbstractMatrix{<:Colorant}) = qoi_encode(f.filename, image)
+save(s::Stream{format"QOI"}, image::AbstractMatrix{<:Colorant}) = qoi_encode(stream(s), image)
 
 end

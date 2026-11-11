@@ -1,6 +1,6 @@
-# QOI.jl - Implementation of the QOI (Quite OK Image) format 
+# QOI.jl - Implementation of the QOI (Quite OK Image) format
 
-[![Build Status](https://github.com/KristofferC/QOI.jl/workflows/CI/badge.svg)](https://github.com/KristofferC/QOI.jl/actions?query=workflows/CI)[![codecov](https://codecov.io/gh/KristofferC/QOI.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/KristofferC/QOI.jl)
+[![Build Status](https://github.com/KristofferC/QOI.jl/workflows/CI/badge.svg)](https://github.com/KristofferC/QOI.jl/actions?query=workflows/CI) [![codecov](https://codecov.io/gh/KristofferC/QOI.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/KristofferC/QOI.jl)
 
 
 This Julia package contains a decoder and encoder for the [QOI image format](https://qoiformat.org/). The QOI format is very simple and can be faster than using PNG (see the [benchmarks](#benchmarks)) at the cost of a slightly worse compression ratio.
@@ -19,18 +19,23 @@ save("test2.qoi", image)
 
 ## Basic API
 
-- `QOI.qoi_decode(f::Union{String, IO})` - Read an image in the QOI format from the file/IO `f` and return a matrix with `RGB` or `RGBA` colorants from [ColorTypes.jl](https://github.com/JuliaGraphics/ColorTypes.jl)
-- `QOI.qoi_encode(f::Union{String, IO}, image::AbstractMatrix{<:Colorant})` - Write the `image` to the the file/IO `f`. 
+- `QOI.qoi_decode(f::Union{String, IO, AbstractVector{UInt8}})` - Read an image in the QOI format from the file/IO/bytes `f` and return a `Matrix` with `RGB{N0f8}` or `RGBA{N0f8}` elements from [ColorTypes.jl](https://github.com/JuliaGraphics/ColorTypes.jl).
+- `QOI.qoi_encode(f::Union{String, IO}, image::AbstractMatrix{<:Colorant})` - Write the `image` to the file/IO `f`.
+  Images with an alpha channel are stored as `RGBA{N0f8}`, all others as `RGB{N0f8}` (other colorants, like `Gray`, are converted).
+
+Invalid or truncated input throws a `QOI.QOIException`.
 
 ## Advanced API
 
-The QOI format is read in row-major order.
-This means that a transpose is required to create the matrices returned in the basic API.
-To avoid this, the following more advanced APIs exist:
+The QOI format stores pixels in row-major order while Julia matrices are column-major,
+so a transpose is required to create the matrices returned in the basic API.
+To avoid this, the following more advanced APIs work directly on the raw bytes:
 
-- `QOI.qoi_decode_raw(v::AbstractVector{UIt8}})` - Takes a vector of the bytes of an image in QOI format and returns the uncompressed vector of bytes from decoding.  
+- `QOI.qoi_decode_raw(f::Union{String, IO, AbstractVector{UInt8}})` - Decodes an image in the QOI format and returns a tuple `(header, image)`
+  where `header` is a `QOI.QOIHeader` (see below) and `image` is a `Matrix{UInt8}` of size `(channels * width, height)` with the uncompressed pixel values.
 
-- `QOI.qoi_encode_raw(image::AbstractVecOrMat{UInt8}, header::QOI.QOIHeader)` - Returns the bytes from compressing the bytes in `image`. The required header is defined as
+- `QOI.qoi_encode_raw(image::AbstractVecOrMat{UInt8}, header::QOI.QOIHeader)` - Returns a `Vector{UInt8}` with the QOI encoding of the
+  raw pixel values in `image` (row-major, `channels` bytes per pixel). The header is defined as
   ```jl
   struct QOIHeader
     width::UInt32
@@ -40,13 +45,16 @@ To avoid this, the following more advanced APIs exist:
   end
   ```
 
-  where `channels` can be either `QOI.QOI_RGB` or `QOI.QOI_RGBA` and `colorspace` can be either `QOI.QOI_SRGB` or `QOI.QOI_LINEAR`
+  where `channels` can be either `QOI.QOI_RGB` or `QOI.QOI_RGBA` and `colorspace` can be either `QOI.QOI_SRGB` or `QOI.QOI_LINEAR`.
 
-- `QOI.qoi_encode_raw!(data::AbstractVecOrMat{UInt8}, image::AbstractVecOrMat{UInt8}, header::QOIHeader)` - Same as above except writing the compressed data into `data`.  
+- `QOI.qoi_encode_raw(io::IO, image::AbstractVecOrMat{UInt8}, header::QOI.QOIHeader)` - Same as above except writing the encoded bytes to `io`.
+
+- `QOI.qoi_encode_raw!(data::AbstractVector{UInt8}, image::AbstractVecOrMat{UInt8}, header::QOI.QOIHeader)` - Same as above except writing the encoded bytes into `data`, which is resized as needed.
+  This allows reusing the output buffer when encoding many images.
 
 ## Benchmarks
 
-The benchmarks here compares the speed of encoding/decoding images with QOI.jl and PNGFiles.jl (which uses `libpng`)
+The benchmarks here compare the speed of encoding/decoding images with QOI.jl and PNGFiles.jl (which uses `libpng`).
 It is supposed to mimic https://qoiformat.org/benchmark/.
 The images used in the benchmark are taken from `TestImages.jl`, specifically, all the PNG images in https://testimages.juliaimages.org/stable/imagelist/.
 The benchmarks were run on Linux on a 12th Gen Intel(R) Core(TM) i9-12900K CPU.
