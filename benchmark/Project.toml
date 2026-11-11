@@ -7,3 +7,6 @@ ImageShow = "4e3cecfd-b093-5904-9786-8bbb286a6a31"
 PNGFiles = "f57f5aa1-a3ce-4bc8-8ab9-96f992907883"
 QOI = "4b34888f-f399-49d4-9bb3-47ed5cae4e65"
 TestImages = "5e47fb64-e119-507b-a336-dd2b206d9990"
+
+[sources]
+QOI = {path = ".."}
