@@ -1,6 +1,6 @@
-# QOI.jl - Implementation of the QOI (Quite OK Image) format 
+# QOI.jl - Implementation of the QOI (Quite OK Image) format
 
-[![Build Status](https://github.com/KristofferC/QOI.jl/workflows/CI/badge.svg)](https://github.com/KristofferC/QOI.jl/actions?query=workflows/CI)[![codecov](https://codecov.io/gh/KristofferC/QOI.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/KristofferC/QOI.jl)
+[![Build Status](https://github.com/KristofferC/QOI.jl/workflows/CI/badge.svg)](https://github.com/KristofferC/QOI.jl/actions?query=workflows/CI) [![codecov](https://codecov.io/gh/KristofferC/QOI.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/KristofferC/QOI.jl)
 
 
 This Julia package contains a decoder and encoder for the [QOI image format](https://qoiformat.org/). The QOI format is very simple and can be faster than using PNG (see the [benchmarks](#benchmarks)) at the cost of a slightly worse compression ratio.
@@ -19,18 +19,23 @@ save("test2.qoi", image)
 
 ## Basic API
 
-- `QOI.qoi_decode(f::Union{String, IO})` - Read an image in the QOI format from the file/IO `f` and return a matrix with `RGB` or `RGBA` colorants from [ColorTypes.jl](https://github.com/JuliaGraphics/ColorTypes.jl)
-- `QOI.qoi_encode(f::Union{String, IO}, image::AbstractMatrix{<:Colorant})` - Write the `image` to the the file/IO `f`. 
+- `QOI.qoi_decode(f::Union{String, IO, AbstractVector{UInt8}})` - Read an image in the QOI format from the file/IO/bytes `f` and return a `Matrix` with `RGB{N0f8}` or `RGBA{N0f8}` elements from [ColorTypes.jl](https://github.com/JuliaGraphics/ColorTypes.jl).
+- `QOI.qoi_encode(f::Union{String, IO}, image::AbstractMatrix{<:Colorant})` - Write the `image` to the file/IO `f`.
+  Images with an alpha channel are stored as `RGBA{N0f8}`, all others as `RGB{N0f8}` (other colorants, like `Gray`, are converted).
+
+Invalid or truncated input throws a `QOI.QOIException`.
 
 ## Advanced API
 
-The QOI format is read in row-major order.
-This means that a transpose is required to create the matrices returned in the basic API.
-To avoid this, the following more advanced APIs exist:
+The QOI format stores pixels in row-major order while Julia matrices are column-major,
+so a transpose is required to create the matrices returned in the basic API.
+To avoid this, the following more advanced APIs work directly on the raw bytes:
 
-- `QOI.qoi_decode_raw(v::AbstractVector{UIt8}})` - Takes a vector of the bytes of an image in QOI format and returns the uncompressed vector of bytes from decoding.  
+- `QOI.qoi_decode_raw(f::Union{String, IO, AbstractVector{UInt8}})` - Decodes an image in the QOI format and returns a tuple `(header, image)`
+  where `header` is a `QOI.QOIHeader` (see below) and `image` is a `Matrix{UInt8}` of size `(channels * width, height)` with the uncompressed pixel values.
 
-- `QOI.qoi_encode_raw(image::AbstractVecOrMat{UInt8}, header::QOI.QOIHeader)` - Returns the bytes from compressing the bytes in `image`. The required header is defined as
+- `QOI.qoi_encode_raw(image::AbstractVecOrMat{UInt8}, header::QOI.QOIHeader)` - Returns a `Vector{UInt8}` with the QOI encoding of the
+  raw pixel values in `image` (row-major, `channels` bytes per pixel). The header is defined as
   ```jl
   struct QOIHeader
     width::UInt32
@@ -40,17 +45,21 @@ To avoid this, the following more advanced APIs exist:
   end
   ```
 
-  where `channels` can be either `QOI.QOI_RGB` or `QOI.QOI_RGBA` and `colorspace` can be either `QOI.QOI_SRGB` or `QOI.QOI_LINEAR`
+  where `channels` can be either `QOI.QOI_RGB` or `QOI.QOI_RGBA` and `colorspace` can be either `QOI.QOI_SRGB` or `QOI.QOI_LINEAR`.
 
-- `QOI.qoi_encode_raw!(data::AbstractVecOrMat{UInt8}, image::AbstractVecOrMat{UInt8}, header::QOIHeader)` - Same as above except writing the compressed data into `data`.  
+- `QOI.qoi_encode_raw(io::IO, image::AbstractVecOrMat{UInt8}, header::QOI.QOIHeader)` - Same as above except writing the encoded bytes to `io`.
+
+- `QOI.qoi_encode_raw!(data::AbstractVector{UInt8}, image::AbstractVecOrMat{UInt8}, header::QOI.QOIHeader)` - Same as above except writing the encoded bytes into `data`, which is resized as needed.
+  This allows reusing the output buffer when encoding many images.
 
 ## Benchmarks
 
-The benchmarks here compares the speed of encoding/decoding images with QOI.jl and PNGFiles.jl (which uses `libpng`)
+The benchmarks here compare the speed of encoding/decoding images with QOI.jl and PNGFiles.jl (which uses `libpng`).
 It is supposed to mimic https://qoiformat.org/benchmark/.
 The images used in the benchmark are taken from `TestImages.jl`, specifically, all the PNG images in https://testimages.juliaimages.org/stable/imagelist/.
-The benchmarks were run on Linux on a 12th Gen Intel(R) Core(TM) i9-12900K CPU.
-They can be repeated by running the `benchmark/runbenchmarks.jl` file with the associated environment.
+The benchmarks were run with Julia 1.13 on an Apple M4 Pro.
+`mpps` is megapixels per second.
+They can be repeated with `julia --project=benchmark benchmark/runbenchmarks.jl` (requires Julia 1.11+).
 
 <details><summary>Expand to see benchmark results</summary>
 
@@ -59,8 +68,8 @@ They can be repeated by running the `benchmark/runbenchmarks.jl` file with the a
 
 |           | decode ms | encode ms | decode mpps | encode mpps | size kb | rate |
 |:-----------|----------:|----------:|------------:|------------:|--------:|-----:|
-|  PNGFiles  |0.24|0.41|233.52|137.4|22.18 |38.6%|
-|  QOI       |0.04|0.13|1418.35|425.17|28.25 |49.2%|
+|  PNGFiles  |0.21|0.25|68.85|57.72|22.18 |38.6%|
+|  QOI       |0.04|0.06|412.15|228.35|28.25 |49.2%|
 
 ----------------------
 
@@ -68,8 +77,8 @@ They can be repeated by running the `benchmark/runbenchmarks.jl` file with the a
 
 |           | decode ms | encode ms | decode mpps | encode mpps | size kb | rate |
 |:-----------|----------:|----------:|------------:|------------:|--------:|-----:|
-|  PNGFiles  |9.05|14.07|131.12|84.35|812.84 |66.9%|
-|  QOI       |3.52|5.03|337.19|235.74|945.75 |77.8%|
+|  PNGFiles  |6.27|10.38|66.13|39.95|812.84 |66.9%|
+|  QOI       |1.5|2.33|277.14|178.34|945.75 |77.8%|
 
 ----------------------
 
@@ -77,8 +86,8 @@ They can be repeated by running the `benchmark/runbenchmarks.jl` file with the a
 
 |           | decode ms | encode ms | decode mpps | encode mpps | size kb | rate |
 |:-----------|----------:|----------:|------------:|------------:|--------:|-----:|
-|  PNGFiles  |2.24|4.4|172.82|88.02|218.84 |55.2%|
-|  QOI       |0.64|1.55|605.92|250.3|233.27 |58.8%|
+|  PNGFiles  |1.81|3.11|74.58|43.5|218.84 |55.2%|
+|  QOI       |0.37|0.67|368.75|203.2|233.27 |58.8%|
 
 ----------------------
 
@@ -86,8 +95,8 @@ They can be repeated by running the `benchmark/runbenchmarks.jl` file with the a
 
 |           | decode ms | encode ms | decode mpps | encode mpps | size kb | rate |
 |:-----------|----------:|----------:|------------:|------------:|--------:|-----:|
-|  PNGFiles  |5.35|11.6|128.28|59.19|443.18 |63.0%|
-|  QOI       |1.98|5.23|346.76|131.24|493.3 |70.2%|
+|  PNGFiles  |3.44|5.97|69.83|40.2|443.18 |63.0%|
+|  QOI       |0.78|1.52|307.31|158.37|493.3 |70.2%|
 
 ----------------------
 
@@ -95,8 +104,8 @@ They can be repeated by running the `benchmark/runbenchmarks.jl` file with the a
 
 |           | decode ms | encode ms | decode mpps | encode mpps | size kb | rate |
 |:-----------|----------:|----------:|------------:|------------:|--------:|-----:|
-|  PNGFiles  |1.56|2.11|119.84|88.84|118.0 |61.5%|
-|  QOI       |0.54|0.86|344.22|216.96|154.86 |80.7%|
+|  PNGFiles  |0.89|1.38|73.52|47.59|118.0 |61.5%|
+|  QOI       |0.21|0.32|309.62|203.87|154.86 |80.7%|
 
 ----------------------
 
@@ -104,8 +113,8 @@ They can be repeated by running the `benchmark/runbenchmarks.jl` file with the a
 
 |           | decode ms | encode ms | decode mpps | encode mpps | size kb | rate |
 |:-----------|----------:|----------:|------------:|------------:|--------:|-----:|
-|  PNGFiles  |5.42|8.0|138.44|93.76|327.45 |42.6%|
-|  QOI       |2.04|3.13|366.9|239.9|463.9 |60.4%|
+|  PNGFiles  |3.47|5.72|75.46|45.81|327.45 |42.6%|
+|  QOI       |0.86|1.62|304.94|162.3|463.9 |60.4%|
 
 ----------------------
 
@@ -113,8 +122,8 @@ They can be repeated by running the `benchmark/runbenchmarks.jl` file with the a
 
 |           | decode ms | encode ms | decode mpps | encode mpps | size kb | rate |
 |:-----------|----------:|----------:|------------:|------------:|--------:|-----:|
-|  PNGFiles  |1.08|1.65|174.16|113.7|108.65 |56.6%|
-|  QOI       |0.38|0.78|491.28|239.6|87.99 |45.8%|
+|  PNGFiles  |0.85|1.24|77.08|52.86|108.65 |56.6%|
+|  QOI       |0.19|0.25|341.63|264.84|87.99 |45.8%|
 
 ----------------------
 
@@ -122,8 +131,8 @@ They can be repeated by running the `benchmark/runbenchmarks.jl` file with the a
 
 |           | decode ms | encode ms | decode mpps | encode mpps | size kb | rate |
 |:-----------|----------:|----------:|------------:|------------:|--------:|-----:|
-|  PNGFiles  |3.68|5.84|203.88|128.53|259.41 |33.8%|
-|  QOI       |1.55|2.99|483.08|251.05|298.29 |38.8%|
+|  PNGFiles  |3.12|4.44|83.96|59.03|259.41 |33.8%|
+|  QOI       |0.98|1.32|268.08|198.06|298.29 |38.8%|
 
 ----------------------
 
@@ -131,8 +140,8 @@ They can be repeated by running the `benchmark/runbenchmarks.jl` file with the a
 
 |           | decode ms | encode ms | decode mpps | encode mpps | size kb | rate |
 |:-----------|----------:|----------:|------------:|------------:|--------:|-----:|
-|  PNGFiles  |1.12|1.7|167.17|109.98|100.71 |52.5%|
-|  QOI       |0.4|0.78|468.04|241.2|82.01 |42.7%|
+|  PNGFiles  |0.86|1.24|75.91|52.67|100.71 |52.5%|
+|  QOI       |0.19|0.24|339.93|278.63|82.01 |42.7%|
 
 ----------------------
 
@@ -140,8 +149,8 @@ They can be repeated by running the `benchmark/runbenchmarks.jl` file with the a
 
 |           | decode ms | encode ms | decode mpps | encode mpps | size kb | rate |
 |:-----------|----------:|----------:|------------:|------------:|--------:|-----:|
-|  PNGFiles  |8.4|13.02|133.94|86.39|692.56 |60.1%|
-|  QOI       |3.41|8.14|329.92|138.25|638.75 |55.4%|
+|  PNGFiles  |5.55|9.73|70.83|40.43|692.56 |60.1%|
+|  QOI       |1.29|2.34|304.0|167.92|638.75 |55.4%|
 
 ----------------------
 
@@ -149,8 +158,8 @@ They can be repeated by running the `benchmark/runbenchmarks.jl` file with the a
 
 |           | decode ms | encode ms | decode mpps | encode mpps | size kb | rate |
 |:-----------|----------:|----------:|------------:|------------:|--------:|-----:|
-|  PNGFiles  |8.36|13.34|134.6|84.3|613.23 |53.2%|
-|  QOI       |3.64|5.04|309.24|223.43|715.79 |62.1%|
+|  PNGFiles  |5.45|9.63|72.14|40.83|613.23 |53.2%|
+|  QOI       |1.4|2.67|281.18|147.46|715.79 |62.1%|
 
 ----------------------
 
@@ -158,8 +167,8 @@ They can be repeated by running the `benchmark/runbenchmarks.jl` file with the a
 
 |           | decode ms | encode ms | decode mpps | encode mpps | size kb | rate |
 |:-----------|----------:|----------:|------------:|------------:|--------:|-----:|
-|  PNGFiles  |1.24|2.3|150.65|81.55|129.52 |67.5%|
-|  QOI       |0.34|1.46|557.65|128.6|144.39 |75.2%|
+|  PNGFiles  |0.95|1.57|68.78|41.77|129.52 |67.5%|
+|  QOI       |0.19|0.34|338.98|190.74|144.39 |75.2%|
 
 ----------------------
 
@@ -167,8 +176,8 @@ They can be repeated by running the `benchmark/runbenchmarks.jl` file with the a
 
 |           | decode ms | encode ms | decode mpps | encode mpps | size kb | rate |
 |:-----------|----------:|----------:|------------:|------------:|--------:|-----:|
-|  PNGFiles  |8.8|13.46|127.78|83.6|892.34 |77.5%|
-|  QOI       |3.05|4.41|369.44|255.16|824.83 |71.6%|
+|  PNGFiles  |5.79|10.4|67.92|37.81|892.34 |77.5%|
+|  QOI       |1.2|2.0|328.71|196.89|824.83 |71.6%|
 
 ----------------------
 
@@ -176,7 +185,7 @@ They can be repeated by running the `benchmark/runbenchmarks.jl` file with the a
 
 |           | decode ms | encode ms | decode mpps | encode mpps | size kb | rate |
 |:-----------|----------:|----------:|------------:|------------:|--------:|-----:|
-|  PNGFiles  |0.34|0.58|274.49|158.87|25.84 |27.2%|
-|  QOI       |0.06|0.18|1513.03|514.79|43.28 |45.6%|
+|  PNGFiles  |0.28|0.36|85.87|68.37|25.84 |27.2%|
+|  QOI       |0.05|0.08|530.17|300.93|43.28 |45.6%|
 
 </details>

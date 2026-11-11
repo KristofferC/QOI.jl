@@ -96,6 +96,12 @@ write(io, hton.(UInt32.([10, 5])))
 write(io, hton.(UInt8.([5, 1])))
 @test_throws QOI.QOIException("invalid channels in header, got 5") QOI.qoi_decode_raw(take!(io))
 
+io = IOBuffer()
+write(io, "qoif")
+write(io, hton.(UInt32.([10, 5])))
+write(io, hton.(UInt8.([2, 1])))
+@test_throws QOI.QOIException("invalid channels in header, got 2") QOI.qoi_decode_raw(take!(io))
+
 # Invalid colorspace
 io = IOBuffer()
 write(io, "qoif")
@@ -124,6 +130,9 @@ write(io, hton.(UInt32.([10, 5])))
 write(io, hton.(UInt8.([3, 1])))
 @test_throws QOI.QOIException("invalid magic bytes, got 0x716f697a, expected 0x716f6966") QOI.qoi_decode_raw(take!(io))
 
+# Invalid images when encoding
+@test_throws QOI.QOIException("invalid width in header, got 0") QOI.qoi_encode(IOBuffer(), zeros(RGB{N0f8}, 0, 0))
+@test_throws QOI.QOIException QOI.qoi_encode_raw(zeros(UInt8, 3), QOI.QOIHeader(2, 2, QOI.QOI_RGB, QOI.QOI_SRGB))
 
 const f_logo = joinpath(@__DIR__, "qoi_logo.qoi")
 
@@ -132,8 +141,14 @@ data_io = open(QOI.qoi_decode, f_logo)
 data_file = QOI.qoi_decode(f_logo)
 @test data_io == data_file
 
-# Test FileIO integration (enable when https://github.com/JuliaIO/FileIO.jl/pull/354 is merged)
+# Test FileIO integration
 @test data_file == FileIO.load(f_logo)
 t = tempname() * ".qoi"
 FileIO.save(t, data_file)
 @test read(f_logo) == read(t)
+
+# FileIO stream API
+@test data_file == open(io -> FileIO.load(FileIO.Stream{format"QOI"}(io)), f_logo)
+io = IOBuffer()
+FileIO.save(FileIO.Stream{format"QOI"}(io), data_file)
+@test take!(io) == read(f_logo)

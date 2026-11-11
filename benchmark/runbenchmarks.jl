@@ -80,7 +80,7 @@ function render_table(io::IO, results::Vector{BenchmarkResult})
         println(io, "`", result.file, "` ", result.dim[1], "x", result.dim[2], " ", round(result.size / 1024; digits=2), "kB")
         println(io)
 
-        mega_pixels = result.size / (1024^2)
+        mega_pixels = prod(result.dim) / 1e6
 
         png_dec_ms = round(result.png_data.load_time / 1e6; digits=2)
         qoi_dec_ms = round(result.qoi_data.load_time / 1e6; digits=2)
